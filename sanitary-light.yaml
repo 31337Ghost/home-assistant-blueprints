@@ -35,10 +35,11 @@ blueprint:
         **NOTE** - You can only use entities. Areas, devices and labels are not supported.
       default: {}
       selector:
-        target:
-          entity:
+        entity:
+          filter:
             domain:
               - light
+          multiple: false
 
     door_opened_delay:
       name: Door Opened Time Delay
