@@ -1,0 +1,191 @@
+blueprint:
+  name: Sanitary Light
+  description: >
+    # 🚽🛁💡 Sanitary Light
+    
+    Yet another light automation based on occupancy (motion) and door contact sensors.
+    
+    Required = *
+  domain: automation
+  input:
+    # Entities
+    motion_trigger:
+      name: Motion Sensor - Binary Sensors *
+      description:
+        Motion sensor occupancy
+      selector:
+        entity:
+          filter:
+            domain:
+              - binary_sensor
+          multiple: false
+    contact_trigger:
+      name: Contact Sensor - Binary Sensors *
+      description:
+        Door open/close sensor
+      selector:
+        entity:
+          filter:
+            domain:
+              - binary_sensor
+          multiple: false
+    light_bulb:
+      name: Light
+      description: The light bulb
+        **NOTE** - You can only use entities. Areas, devices and labels are not supported.
+      default: {}
+      selector:
+        target:
+          entity:
+            domain:
+              - light
+
+    door_opened_delay:
+      name: Door Opened Time Delay
+      description: This time delay determines how long the light will remain active after door opened trigger, initiating the time delay to turn them OFF.
+      default: 5
+      selector:
+        number:
+          min: 0
+          max: 30
+          step: 0.5
+          unit_of_measurement: minutes
+    door_closed_delay:
+      name: Door Closed Time Delay
+      description: This time delay determines how long the light will remain active after door closed trigger, initiating the time delay to turn them OFF.
+      default: 1
+      selector:
+        number:
+          min: 0
+          max: 30
+          step: 0.5
+          unit_of_measurement: minutes
+    motion_detected_delay:
+      name: Motion Detected Time Delay
+      description: This time delay determines how long the light will remain active after motion detected trigger, initiating the time delay to turn them OFF.
+      default: 10
+      selector:
+        number:
+          min: 0
+          max: 30
+          step: 0.5
+          unit_of_measurement: minutes
+
+    # Brightness
+    day_light_brightness:
+      name: Day Brightness
+      description: The brightness setting for the light when it is turned ON during the day.
+      default: 40
+      selector:
+        number:
+          min: 1
+          max: 100
+          mode: slider
+          step: 1
+          unit_of_measurement: '%'
+    night_light_brightness:
+      name: Night - Brightness
+      description: The brightness setting of the night light when it is turned ON during the night.
+      default: 20
+      selector:
+        number:
+          min: 1
+          max: 100
+          mode: slider
+          step: 1
+          unit_of_measurement: '%'
+
+    # Nighttime bounds
+    night_light_after_time:
+      name: Night Lights - Start Time
+      description: Set the start time.
+      default: 21:00:00
+      selector:
+        time:
+    night_light_before_time:
+      name: Night Lights - End Time
+      description: Set the end time.
+      default: 07:30:00
+      selector:
+        time:
+
+# All triggers have to restart currently running delays.
+mode: restart
+max_exceeded: silent
+
+trigger:
+  - platform: state
+    entity_id: !input contact_trigger
+    from: "off"
+    to: "on"
+    id: door_opened
+  - platform: state
+    entity_id: !input contact_trigger
+    from: "on"
+    to: "off"
+    id: door_closed
+  - platform: state
+    entity_id: !input motion_trigger
+    from: "off"
+    to: "on"
+    id: motion_detected
+
+condition: []
+
+action:
+  - alias: Turn on with day/night brightness
+    if:
+      - condition: time
+        after: !input night_light_after_time
+        before: !input night_light_before_time
+    then:
+      - service: light.turn_on
+        target:
+          entity_id: !input light_bulb
+        data:
+          brightness_pct: !input night_light_brightness
+    else:
+      - service: light.turn_on
+        target:
+          entity_id: !input light_bulb
+        data:
+          brightness_pct: !input day_light_brightness
+  - choose:
+      - alias: Delay on door opened
+        conditions:
+          - condition: trigger
+            id: door_opened
+        sequence:
+          - delay:
+              minutes: !input door_opened_delay
+      - alias: Delay on door closed
+        conditions:
+          - condition: trigger
+            id: door_closed
+        sequence:
+          - delay:
+              minutes: !input door_closed_delay
+      - alias: Delay on motion detected
+        conditions:
+          - condition: trigger
+            id: motion_detected
+        sequence:
+          - delay:
+              minutes: !input motion_detected_delay
+  - alias: Wait for motion sensor clear
+    if:
+      - condition: not
+        conditions:
+          - condition: state
+            entity_id: !input motion_trigger
+            state: "off"
+    then:
+      - wait_for_trigger:
+          - platform: state
+            entity_id: !input motion_trigger
+            to: "off"
+  - alias: Turn off light
+    service: light.turn_off
+    target:
+      entity_id: !input light_bulb
+    data: {}
