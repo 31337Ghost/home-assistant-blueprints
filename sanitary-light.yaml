@@ -33,7 +33,6 @@ blueprint:
       name: Light
       description: The light bulb
         **NOTE** - You can only use entities. Areas, devices and labels are not supported.
-      default: {}
       selector:
         entity:
           filter:
@@ -100,7 +99,7 @@ blueprint:
     night_light_after_time:
       name: Night Lights - Start Time
       description: Set the start time.
-      default: 21:00:00
+      default: 00:00:00
       selector:
         time:
     night_light_before_time:
