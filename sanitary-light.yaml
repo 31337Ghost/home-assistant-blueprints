@@ -31,7 +31,8 @@ blueprint:
           multiple: false
     light_bulb:
       name: Light
-      description: The light bulb
+      description: >
+        The light bulb.
         **NOTE** - You can only use entities. Areas, devices and labels are not supported.
       selector:
         entity:
@@ -42,33 +43,33 @@ blueprint:
 
     door_opened_delay:
       name: Door Opened Time Delay
-      description: This time delay determines how long the light will remain active after door opened trigger, initiating the time delay to turn them OFF.
+      description: This time delay determines how long the light will remain active after door opened trigger, initiating the time delay to turn light OFF.
       default: 5
       selector:
         number:
-          min: 0
-          max: 30
-          step: 0.5
+          min: 1
+          max: 60
+          step: 1
           unit_of_measurement: minutes
     door_closed_delay:
       name: Door Closed Time Delay
-      description: This time delay determines how long the light will remain active after door closed trigger, initiating the time delay to turn them OFF.
+      description: This time delay determines how long the light will remain active after door closed trigger and no motion detected, if motion is detected then "Motion detected delay" will be used, initiating the time delay to turn light OFF.
       default: 1
       selector:
         number:
-          min: 0
-          max: 30
-          step: 0.5
+          min: 1
+          max: 60
+          step: 1
           unit_of_measurement: minutes
     motion_detected_delay:
       name: Motion Detected Time Delay
-      description: This time delay determines how long the light will remain active after motion detected trigger, initiating the time delay to turn them OFF.
+      description: This time delay determines how long the light will remain active after motion detected trigger, initiating the time delay to turn light OFF.
       default: 10
       selector:
         number:
-          min: 0
-          max: 30
-          step: 0.5
+          min: 1
+          max: 60
+          step: 1
           unit_of_measurement: minutes
 
     # Brightness
@@ -156,27 +157,25 @@ action:
         sequence:
           - delay:
               minutes: !input door_opened_delay
-      - alias: Delay on door closed
+      - alias: Delay on door closed and motion sensor is clear
         conditions:
           - condition: trigger
             id: door_closed
-        sequence:
-          - delay:
-              minutes: !input door_closed_delay
-      - alias: Delay on motion detected
-        conditions:
-          - condition: trigger
-            id: motion_detected
-        sequence:
-          - delay:
-              minutes: !input motion_detected_delay
-  - alias: Wait for motion sensor clear
-    if:
-      - condition: not
-        conditions:
           - condition: state
             entity_id: !input motion_trigger
             state: "off"
+        sequence:
+          - delay:
+              minutes: !input door_closed_delay
+    default:
+      - alias: Default delay on motion detected
+        delay:
+          minutes: !input motion_detected_delay
+  - alias: Wait for motion sensor clear
+    if:
+      - condition: state
+        entity_id: !input motion_trigger
+        state: "on"
     then:
       - wait_for_trigger:
           - platform: state
