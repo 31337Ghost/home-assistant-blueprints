@@ -1,6 +1,6 @@
 blueprint:
   name: Breezer CO2 control (target + profiles + night ceiling)
-  source_url: https://raw.githubusercontent.com/31337Ghost/home-assistant-blueprints/refs/heads/feature/breezer-co2-max/blueprints/automation/breezer/breezer_co2_target_profile.yaml
+  source_url: https://raw.githubusercontent.com/31337Ghost/home-assistant-blueprints/main/breezer_co2_target_profile.yaml
   description: 'Controls Ballu OneAir via climate entity using MAX CO2 from multiple
     sensors. Uses a target CO2 setpoint and human-friendly profiles (eco/comfort/aggressive).
     Night mode supports a hard ceiling on max fan speed (level 1..7). Self-recover
