@@ -1,0 +1,309 @@
+blueprint:
+  name: Breezer CO2 control (target + profiles + night ceiling)
+  source_url: https://raw.githubusercontent.com/31337Ghost/home-assistant-blueprints/main/breezer_co2_target_profile.yaml
+  description: 'Controls Ballu OneAir via climate entity using MAX CO2 from multiple
+    sensors. Uses a target CO2 setpoint and human-friendly profiles (eco/comfort/aggressive).
+    Night mode supports a hard ceiling on max fan speed (level 1..7). Self-recover
+    keeps fan from staying OFF after external changes. Version: 2026-05-09.2
+
+    '
+  domain: automation
+  input:
+    breezer_climate:
+      name: Breezer climate entity
+      selector:
+        entity:
+          domain:
+          - climate
+          reorder: false
+          multiple: false
+    co2_sensors:
+      name: CO2 sensors (choose 1 now, add more later)
+      selector:
+        entity:
+          domain:
+          - sensor
+          multiple: true
+          reorder: false
+    target_co2:
+      name: Target CO2 (ppm)
+      default: 580
+      selector:
+        number:
+          min: 420.0
+          max: 2000.0
+          step: 10.0
+          mode: slider
+    day_profile:
+      name: Day profile
+      default: aggressive
+      selector:
+        select:
+          options:
+          - eco
+          - comfort
+          - aggressive
+          multiple: false
+          custom_value: false
+          sort: false
+    night_profile:
+      name: Night profile
+      default: eco
+      selector:
+        select:
+          options:
+          - eco
+          - comfort
+          - aggressive
+          multiple: false
+          custom_value: false
+          sort: false
+    night_max_speed_level:
+      name: Night max fan speed level (1..7)
+      description: 'Hard ceiling for night fan speed. Example: 2 means max 2_speed.'
+      default: 2
+      selector:
+        number:
+          min: 1.0
+          max: 7.0
+          step: 1.0
+          mode: slider
+    force_night_boolean:
+      name: Force night mode (optional)
+      default: ''
+      selector:
+        entity:
+          domain:
+          - input_boolean
+          reorder: false
+          multiple: false
+    night_start:
+      name: Night start
+      default: '23:00:00'
+      selector:
+        time: {}
+    night_end:
+      name: Night end
+      default: 08:00:00
+      selector:
+        time: {}
+    last_change_dt:
+      name: Helper - last change datetime (input_datetime)
+      selector:
+        entity:
+          domain:
+          - input_datetime
+          reorder: false
+          multiple: false
+    turbo_until_dt:
+      name: Helper - turbo until datetime (input_datetime)
+      selector:
+        entity:
+          domain:
+          - input_datetime
+          reorder: false
+          multiple: false
+    min_change_interval:
+      name: Minimum time between changes
+      default: 00:08:00
+      selector:
+        duration: {}
+    turbo_duration:
+      name: Turbo duration
+      default: 00:12:00
+      selector:
+        duration: {}
+mode: restart
+max: 5
+variables:
+  breezer: !input breezer_climate
+  sensors: !input co2_sensors
+  in_force_night_boolean: !input force_night_boolean
+  in_night_start: !input night_start
+  in_night_end: !input night_end
+  in_last_change_dt: !input last_change_dt
+  in_turbo_until_dt: !input turbo_until_dt
+  target_co2: !input target_co2
+  day_profile: !input day_profile
+  night_profile: !input night_profile
+  night_max_speed_level: !input night_max_speed_level
+  min_change_interval: !input min_change_interval
+  turbo_duration: !input turbo_duration
+  co2: "{#\n  Compute MAX CO2 from selected sensors.\n  NOTE: do not rely on expand(sensors)
+    here; in blueprints the selection object can behave differently.\n  Use states(eid)
+    by iterating entity_id strings.\n#} {% set ns = namespace(vals=[]) %} {% for eid
+    in (sensors if sensors is iterable else []) %}\n  {% set st = states(eid) %}\n
+    \ {% if st not in ['unknown','unavailable','none',''] %}\n    {% set v = st |
+    float(none) %}\n    {% if v is not none and v > 0 %}\n      {% set ns.vals = ns.vals
+    + [v] %}\n    {% endif %}\n  {% endif %}\n{% endfor %} {{ (ns.vals|max) if (ns.vals|length>0)
+    else 0 }}\n"
+  force_night: '{% set e = in_force_night_boolean %} {{ e is string and e|length >
+    0 and is_state(e, ''on'') }}
+
+    '
+  ns_ts: '{{ as_timestamp(today_at(in_night_start)) }}'
+  ne_ts: '{{ as_timestamp(today_at(in_night_end)) }}'
+  is_night_time: "{% set n = now().timestamp() %} {% set ns = ns_ts | float(0) %}
+    {% set ne = ne_ts | float(0) %} {% if ne > ns %}\n  {{ n >= ns and n < ne }}\n{%
+    else %}\n  {{ n >= ns or n < ne }}\n{% endif %}\n"
+  is_night: '{{ force_night or is_night_time }}'
+  last_change_ts: '{{ as_timestamp(states(in_last_change_dt)) | default(0) }}'
+  turbo_until_ts: '{{ as_timestamp(states(in_turbo_until_dt)) | default(0) }}'
+  turbo_active: '{{ now().timestamp() < (turbo_until_ts | float(0)) }}'
+  apply_lock_s: 35
+  apply_lock_active: '{{ (now().timestamp() - (last_change_ts | float(0))) < (apply_lock_s | float(0)) }}'
+  prof: '{% set p = night_profile if is_night else day_profile %} {{ p }}
+
+    '
+  d1: '{% if prof == ''eco'' %} 40 {% elif prof == ''comfort'' %} 30 {% else %} 20
+    {% endif %}
+
+    '
+  d2: '{% if prof == ''eco'' %} 120 {% elif prof == ''comfort'' %} 90 {% else %} 60
+    {% endif %}
+
+    '
+  d3: '{% if prof == ''eco'' %} 220 {% elif prof == ''comfort'' %} 170 {% else %}
+    120 {% endif %}
+
+    '
+  turbo_delta: '{% if prof == ''eco'' %} 420 {% elif prof == ''comfort'' %} 320 {%
+    else %} 250 {% endif %}
+
+    '
+  desired_level_raw: "{% set t = target_co2 | float(0) %} {% set v = co2 | float(0)
+    %} {% if turbo_active %}\n  7\n{% elif v <= 0 %}\n  1\n{% elif v >= (t + (d3|float))
+    %}\n  3\n{% elif v >= (t + (d2|float)) %}\n  2\n{% elif v >= (t + (d1|float))
+    %}\n  1\n{% else %}\n  1\n{% endif %}\n"
+  desired_level: "{% set lvl = desired_level_raw | int(1) %} {% if is_night %}\n  {{
+    [lvl, (night_max_speed_level | int(1))] | min }}\n{% else %}\n  {{ lvl }}\n{%
+    endif %}\n"
+  desired_fan_mode: '{{ desired_level | int(1) }}_speed'
+  desired_preset: '{% if turbo_active %} turbo {% elif is_night %} night {% else %}
+    hands {% endif %}
+
+    '
+trigger:
+- id: night_start
+  platform: time
+  at: !input night_start
+- id: night_end
+  platform: time
+  at: !input night_end
+- id: co2_change
+  platform: state
+  entity_id: !input co2_sensors
+- id: tick
+  platform: time_pattern
+  minutes: /5
+- id: breezer_state
+  platform: state
+  entity_id: !input breezer_climate
+condition: []
+action:
+- variables:
+    min_s: '{{ (as_timedelta(min_change_interval)).total_seconds() }}'
+    cooldown_ok: '{{ (now().timestamp() - last_change_ts) >= (min_s | float) }}'
+    boundary_trigger: '{{ trigger.id in [''night_start'',''night_end''] }}'
+    current_hvac: '{{ states(breezer) or '''' }}'
+    current_preset: '{{ state_attr(breezer,''preset_mode'') or '''' }}'
+    current_fan: '{{ state_attr(breezer,''fan_mode'') or '''' }}'
+    needs_recover: '{{ current_hvac != ''fan_only'' or current_fan in [''off'',''unknown'',''unavailable'','''']
+      }}'
+    trigger_is_breezer_state: '{{ trigger.id == ''breezer_state'' }}'
+    ignore_self_breezer_state: '{{ trigger_is_breezer_state and apply_lock_active }}'
+    want_turbo: '{{ (not is_night) and (co2|float(0)) >= (target_co2|float(0) + (turbo_delta|float))
+      }}
+
+      '
+- choose:
+  - conditions:
+    - condition: template
+      value_template: '{{ ignore_self_breezer_state or ((not cooldown_ok) and (not turbo_active) and (not boundary_trigger)
+        and (not want_turbo) and (not needs_recover)) }}'
+    sequence:
+    - stop: Cooldown active
+- choose:
+  - conditions:
+    - condition: template
+      value_template: '{{ want_turbo }}'
+    - condition: template
+      value_template: '{{ not is_night }}'
+    sequence:
+    - choose:
+      - conditions:
+        - condition: template
+          value_template: '{{ current_hvac != ''fan_only'' }}'
+        sequence:
+        - service: climate.set_hvac_mode
+          target:
+            entity_id: !input breezer_climate
+          data:
+            hvac_mode: fan_only
+    - service: climate.set_preset_mode
+      target:
+        entity_id: !input breezer_climate
+      data:
+        preset_mode: turbo
+    - service: input_datetime.set_datetime
+      target:
+        entity_id: '{{ in_turbo_until_dt }}'
+      data:
+        timestamp: '{{ (now() + as_timedelta(turbo_duration)).timestamp() | int }}'
+    - service: input_datetime.set_datetime
+      target:
+        entity_id: '{{ in_last_change_dt }}'
+      data:
+        timestamp: '{{ now().timestamp() | int }}'
+    - service: logbook.log
+      data:
+        name: ASP100 Auto
+        message: 'turbo apply: co2={{ co2 }}, target={{ target_co2 }}, profile={{ prof }}, trigger={{ trigger.id }}'
+        entity_id: !input breezer_climate
+    - stop: Turbo started
+- choose:
+  - conditions:
+    - condition: template
+      value_template: '{{ current_hvac != ''fan_only'' }}'
+    sequence:
+    - service: climate.set_hvac_mode
+      target:
+        entity_id: !input breezer_climate
+      data:
+        hvac_mode: fan_only
+- choose:
+  - conditions:
+    - condition: template
+      value_template: '{{ current_preset != (desired_preset|string) }}'
+    sequence:
+    - service: climate.set_preset_mode
+      target:
+        entity_id: !input breezer_climate
+      data:
+        preset_mode: '{{ desired_preset }}'
+- choose:
+  - conditions:
+    - condition: template
+      value_template: '{{ current_fan != (desired_fan_mode|string) }}'
+    sequence:
+    - service: climate.set_fan_mode
+      target:
+        entity_id: !input breezer_climate
+      data:
+        fan_mode: '{{ desired_fan_mode }}'
+- service: logbook.log
+  data:
+    name: ASP100 Auto
+    message: 'apply: preset {{ current_preset }}→{{ desired_preset }}, fan {{ current_fan }}→{{ desired_fan_mode }}, co2={{ co2 }}, trigger={{ trigger.id }}'
+    entity_id: !input breezer_climate
+- choose:
+  - conditions:
+    - condition: template
+      value_template: "{{ (current_preset != (desired_preset|string))\n   or (current_fan
+        != (desired_fan_mode|string)) }}\n"
+    sequence:
+    - service: input_datetime.set_datetime
+      target:
+        entity_id: '{{ in_last_change_dt }}'
+      data:
+        timestamp: '{{ now().timestamp() | int }}'
